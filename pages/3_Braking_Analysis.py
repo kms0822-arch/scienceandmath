@@ -11,11 +11,11 @@ st.set_page_config(
 g = 9.8
 
 ROAD_INFO = {
-    "🌞 건조한 아스팔트": {"mu": 0.75, "color": "#2563EB"},
-    "🌧️ 젖은 아스팔트":  {"mu": 0.45, "color": "#10B981"},
-    "🌨️ 눈길":           {"mu": 0.25, "color": "#F59E0B"},
-    "🧊 빙판":           {"mu": 0.08, "color": "#EF4444"},
-    "🏎️ 레이싱 트랙":    {"mu": 1.20, "color": "#7C3AED"},
+    "🌞 건조한 아스팔트": {"mu": 0.70, "color": "#2563EB"},   # 자전거 타이어 건식
+    "🌧️ 젖은 아스팔트":  {"mu": 0.40, "color": "#10B981"},   # 자전거 타이어 습식
+    "🌨️ 눈길":           {"mu": 0.20, "color": "#F59E0B"},   # 압설 위 자전거
+    "🧊 빙판":           {"mu": 0.06, "color": "#EF4444"},   # 결빙 노면
+    "🚵 자갈/흙길":      {"mu": 0.45, "color": "#7C3AED"},   # 비포장 MTB 노면
 }
 
 def blayout(title, xt, yt, h=360):
@@ -32,20 +32,20 @@ def blayout(title, xt, yt, h=360):
 # ─────────────────────────────────────────────
 # 헤더
 # ─────────────────────────────────────────────
-st.title("🔬 제동 변수 탐구")
-st.caption("질량 · 반응시간 · 마찰계수 · 속도가 제동거리에 미치는 영향을 분석합니다")
+st.title("🚲 제동 변수 탐구 — 자전거 기준")
+st.caption("자전거(탑승자 포함) 기준 | 질량 · 반응시간 · 노면 상태 · 속도가 제동거리에 미치는 영향을 분석합니다")
 
 # ─────────────────────────────────────────────
 # 입력
 # ─────────────────────────────────────────────
 c1, c2, c3, c4 = st.columns(4)
 with c1:
-    speed_kmh = st.slider("🚀 초기 속도 (km/h)", 10, 200, 80, step=10)
+    speed_kmh = st.slider("🚲 초기 속도 (km/h)", 5, 80, 25, step=5)
 with c2:
-    t_react   = st.slider("⏱️ 반응 시간 (s)",    0.5, 3.0, 1.0, step=0.1)
+    t_react   = st.slider("⏱️ 반응 시간 (s)",    0.5, 3.0, 1.2, step=0.1)
 with c3:
-    mass      = st.slider("⚖️ 질량 (kg)",        500, 3000, 1200, step=100,
-                          help="제동거리 공식 d=v²/(2μg)에 질량이 없어요. 직접 바꿔보세요!")
+    mass      = st.slider("⚖️ 총 질량 (kg)  탑승자+자전거", 40, 150, 75, step=5,
+                          help="자전거(7~15kg) + 탑승자 체중 합산 | 제동거리 공식 d=v²/(2μg)에 질량이 없어요. 직접 바꿔보세요!")
 with c4:
     road      = st.selectbox("🛣️ 기준 노면", list(ROAD_INFO.keys()))
 
@@ -68,7 +68,7 @@ k2.metric("🔴 제동거리",  f"{d_b:.1f} m")
 k3.metric("📏 정지거리",  f"{d_tot:.1f} m")
 k4.metric("📉 감속도",    f"{decel:.2f} m/s²")
 k5.metric("🔧 마찰력",    f"{F_fric/1000:.1f} kN",
-          delta=f"= μ×m×g = {mu}×{mass}×9.8")
+          delta=f"= μ×(탑승자+자전거)×g = {mu}×{mass}×9.8")
 k6.metric("⚖️ 질량 영향", "없음 ✗",
           help="F=μmg, a=F/m=μg → 질량 소거됨")
 
@@ -86,7 +86,7 @@ ROAD_BG = {
     "🌧️ 젖은 아스팔트":  "rgba(186,230,253,0.55)",
     "🌨️ 눈길":           "rgba(240,253,255,0.95)",
     "🧊 빙판":           "rgba(207,250,254,0.90)",
-    "🏎️ 레이싱 트랙":    "rgba(15,23,42,0.12)",
+    "🚵 자갈/흙길":      "rgba(245,230,210,0.70)",
 }
 anim_bg = ROAD_BG.get(road, "rgba(241,245,249,0.95)")
 
@@ -202,7 +202,7 @@ with tab1:
 
     # ── 왼쪽: d vs v (음수 포함) ──────────────────
     with tl:
-        v_full = np.linspace(-220, 220, 600)   # km/h
+        v_full = np.linspace(-90, 90, 600)    # km/h (자전거 범위)
         v_ms   = v_full / 3.6
 
         d_brake_full = v_ms**2 / (2*decel)
@@ -369,7 +369,7 @@ with tab2:
         key="mu_compare",
     )
 
-    v_range = np.linspace(0, 200, 400)   # km/h
+    v_range = np.linspace(0, 80, 400)    # km/h (자전거 범위)
     v_ms    = v_range / 3.6
 
     m2l, m2r = st.columns(2)
@@ -473,7 +473,7 @@ with tab3:
     t_react_list = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
     T_COLORS     = ["#7C3AED","#2563EB","#10B981","#F59E0B","#EA580C","#DC2626"]
 
-    v_range2 = np.linspace(0, 200, 400)
+    v_range2 = np.linspace(0, 80, 400)
     v_ms2    = v_range2 / 3.6
     d_brake2 = v_ms2**2 / (2*decel)   # 제동거리 (반응시간 무관)
 
@@ -589,7 +589,7 @@ with tab4:
     $$d = \\frac{v^2}{2a} = \\frac{v^2}{2\\mu g} \\quad \\leftarrow \\textbf{질량 없음!}$$
     """)
 
-    masses_test = [500, 800, 1200, 1800, 2500, 3000]
+    masses_test = [40, 55, 70, 90, 110, 150]
     d_test = [(speed_kmh/3.6)**2 / (2*mu*g)] * len(masses_test)   # 모두 동일!
     F_tests = [mu * m * g / 1000 for m in masses_test]             # 마찰력은 다름
 
