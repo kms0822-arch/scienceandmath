@@ -293,8 +293,7 @@ with tab1:
 
     fig_para.update_layout(
         **blayout("s = vt + v²/(2μg)  —  반응시간별 평행이동",
-                  "초기 속력 v (km/h)", "정지거리 s (m)"),
-        height=480,
+                  "초기 속력 v (km/h)", "정지거리 s (m)", h=480),
     )
     st.plotly_chart(fig_para, use_container_width=True)
 
