@@ -80,17 +80,31 @@ st.divider()
 st.markdown("### 🎬 제동 시뮬레이션")
 st.caption(f"반응 구간(🟢) {d_r:.1f}m  +  제동 구간(🔴) {d_b:.1f}m  =  정지거리 {d_tot:.1f}m")
 
-Nr, Nb = 35, 55
-tr_f = np.linspace(0,       t_react, Nr)
-tb_f = np.linspace(t_react, t_tot,   Nb)
-xr_f = v0 * tr_f
-xb_f = d_r + v0*(tb_f-t_react) - 0.5*decel*(tb_f-t_react)**2
-all_x = np.concatenate([xr_f, xb_f])
-phases = ["r"]*Nr + ["b"]*Nb
-pad = d_tot * 0.1
+# 노면별 배경색
+ROAD_BG = {
+    "🌞 건조한 아스팔트": "rgba(241,245,249,0.95)",
+    "🌧️ 젖은 아스팔트":  "rgba(186,230,253,0.55)",
+    "🌨️ 눈길":           "rgba(240,253,255,0.95)",
+    "🧊 빙판":           "rgba(207,250,254,0.90)",
+    "🏎️ 레이싱 트랙":    "rgba(15,23,42,0.12)",
+}
+anim_bg = ROAD_BG.get(road, "rgba(241,245,249,0.95)")
 
-vb_f = np.maximum(0, (v0 - decel*(tb_f-t_react)) * 3.6)
-all_v = np.concatenate([np.full(Nr, speed_kmh), vb_f])
+# ★ 전체 구간을 균등 시간 간격으로 나눠 실제 속도와 동일하게
+N_total = 90
+t_all = np.linspace(0, t_tot, N_total)
+all_x = np.where(
+    t_all <= t_react,
+    v0 * t_all,
+    np.maximum(0, d_r + v0*(t_all - t_react) - 0.5*decel*(t_all - t_react)**2),
+)
+phases = ["r" if t <= t_react else "b" for t in t_all]
+all_v  = np.where(
+    t_all <= t_react,
+    float(speed_kmh),
+    np.maximum(0.0, (v0 - decel*(t_all - t_react)) * 3.6),
+)
+pad = d_tot * 0.1
 
 frames = []
 for i,(x,ph,spd) in enumerate(zip(all_x, phases, all_v)):
@@ -148,7 +162,7 @@ fig_anim.update_layout(
     xaxis=dict(range=[-pad, d_tot+pad*2], title="거리 (m)", showgrid=False),
     yaxis=dict(range=[-1,1], showticklabels=False, showgrid=False, zeroline=False),
     legend=dict(orientation="h", y=1.1, font=dict(size=11)),
-    plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+    plot_bgcolor=anim_bg, paper_bgcolor="rgba(0,0,0,0)",
     updatemenus=[dict(
         type="buttons", showactive=False, y=-0.3, x=0.5, xanchor="center",
         buttons=[
@@ -211,23 +225,30 @@ with tab1:
                                yanchor="top")
 
         # 제동거리만 (순수 포물선)
+        # 제동거리 — 양수(실선) / 음수(점선, 가상)
         fig_dv.add_trace(go.Scatter(
             x=v_full[v_full<0], y=d_brake_full[v_full<0],
-            name="제동거리 (역방향)",
-            line=dict(color="#CBD5E1", width=2.5, dash="dot"),
+            name="제동거리 (역방향, 가상)",
+            line=dict(color="#CBD5E1", width=2.5, dash="dash"),
         ))
         fig_dv.add_trace(go.Scatter(
             x=v_full[v_full>=0], y=d_brake_full[v_full>=0],
-            name="제동거리",
+            name="제동거리 (실측)",
             line=dict(color=col_cur, width=3),
             fill="tozeroy", fillcolor=f"rgba(37,99,235,0.07)",
         ))
 
-        # 전체 정지거리 (반응 포함)
+        # 정지거리 — 양수(실선) / 음수(점선, 가상)
         fig_dv.add_trace(go.Scatter(
-            x=v_full, y=d_total_full,
+            x=v_full[v_full>=0], y=d_total_full[v_full>=0],
             name="정지거리 (반응 포함)",
+            line=dict(color="#F59E0B", width=2.5),
+        ))
+        fig_dv.add_trace(go.Scatter(
+            x=v_full[v_full<0], y=d_total_full[v_full<0],
+            name="정지거리 (역방향, 가상)",
             line=dict(color="#F59E0B", width=2, dash="dash"),
+            showlegend=False,
         ))
 
         # v=0 수직선
