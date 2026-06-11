@@ -587,9 +587,8 @@ with tab4:
         fig_m1.update_layout(
             **blayout(f"질량별 제동거리 ({speed_kmh}km/h, μ={mu})",
                       "질량 (kg)", "제동거리 (m)", h=320),
-            yaxis=dict(range=[0, d_test[0]*1.5], showgrid=True,
-                       gridcolor="rgba(0,0,0,0.06)"),
         )
+        fig_m1.update_yaxes(range=[0, d_test[0]*1.5])
         st.plotly_chart(fig_m1, use_container_width=True)
         st.caption(f"모든 질량에서 제동거리 = **{d_test[0]:.2f} m** (완전히 동일)")
 
