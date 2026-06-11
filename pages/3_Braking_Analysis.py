@@ -511,7 +511,8 @@ with tab3:
         fig_rt2.add_trace(go.Bar(
             x=[f"{tr}s" for tr in t_react_list],
             y=d_reacts_bar, name="반응거리",
-            marker_color=[col+"CC" for col in T_COLORS],
+            marker_color=T_COLORS,
+            opacity=0.75,
             hovertemplate="반응거리: %{y:.1f}m<extra></extra>",
         ))
         fig_rt2.add_trace(go.Bar(
