@@ -373,8 +373,7 @@ with tab1:
         showarrow=False, font=dict(size=10, color="#DC2626"),
     )
     fig_vt.update_layout(
-        **blayout("속력 – 시간 (정지 이후 이론 연장)", "시간 t (s)", "속력 v (km/h)"),
-        height=300,
+        **blayout("속력 – 시간 (정지 이후 이론 연장)", "시간 t (s)", "속력 v (km/h)", h=300),
     )
     st.plotly_chart(fig_vt, use_container_width=True)
     st.caption("점선 = 마찰이 계속 작용한다면 속력이 음수 영역으로 진입 · 실제는 v=0에서 정지")
