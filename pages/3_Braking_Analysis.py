@@ -173,7 +173,8 @@ fig_anim.update_layout(
         type="buttons", showactive=False, y=-0.3, x=0.5, xanchor="center",
         buttons=[
             dict(label="▶ 재생", method="animate",
-                 args=[None,{"frame":{"duration":70,"redraw":True},
+                 args=[None,{"frame":{"duration": max(10, round(t_tot*1000/N_total)),
+                                      "redraw":True},
                              "fromcurrent":True,"transition":{"duration":0}}]),
             dict(label="⏹ 정지", method="animate",
                  args=[[None],{"frame":{"duration":0},"mode":"immediate"}]),
@@ -195,174 +196,148 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ══════════════════════════════════════════════
-# Tab 1 — 제동거리-속력 (음수 포함)
+# Tab 1 — 제동거리-속력 그래프 & 반응시간 영향
 # ══════════════════════════════════════════════
 with tab1:
-    st.markdown("#### 속력의 전 범위(음수 포함)에서 제동거리-속력 관계")
+    st.markdown("#### 제동거리 – 속력 그래프와 반응시간에 따른 정지거리 변화")
     st.caption(
-        "d = v²/(2μg) 는 짝함수(even function) → v < 0 방향으로도 대칭인 포물선!  "
-        "오른쪽: 속력-시간 그래프에서 v=0 이후 이론값 연장선(점선)도 확인"
+        "왼쪽: 제동거리(파란)는 v²에 비례하는 이차함수 · 반응거리(초록)는 v에 비례하는 일차함수 · 합이 정지거리  "
+        "오른쪽: 반응시간이 길어질수록 곡선 전체가 위로 평행 이동"
     )
 
     tl, tr = st.columns(2)
+    v_plot  = np.linspace(0, 80, 400)   # km/h
+    v_ms_p  = v_plot / 3.6
+    col_cur = ROAD_INFO[road]["color"]
 
-    # ── 왼쪽: d vs v (음수 포함) ──────────────────
+    # ── 왼쪽: d_brake + d_react 분해 ──────────────────
     with tl:
-        v_full = np.linspace(-90, 90, 600)    # km/h (자전거 범위)
-        v_ms   = v_full / 3.6
+        d_b_curve = v_ms_p**2 / (2*decel)          # 제동거리 (이차)
+        d_r_curve = v_ms_p * t_react                # 반응거리 (일차)
+        d_t_curve = d_b_curve + d_r_curve           # 정지거리 합
 
-        d_brake_full = v_ms**2 / (2*decel)
-        d_total_full = np.abs(v_ms)*t_react + v_ms**2/(2*decel)
-
-        col_cur = ROAD_INFO[road]["color"]
         fig_dv = go.Figure()
 
-        # 음수 영역 배경
-        fig_dv.add_shape(type="rect", x0=-220, x1=0,
-                         y0=0, y1=1, yref="paper",
-                         fillcolor="rgba(148,163,184,0.06)", line_width=0)
-        fig_dv.add_annotation(x=-110, y=1, yref="paper",
-                               text="← 역방향 (대칭)",
-                               showarrow=False, font=dict(size=10, color="#94A3B8"),
-                               yanchor="top")
-        fig_dv.add_annotation(x=110, y=1, yref="paper",
-                               text="순방향 →",
-                               showarrow=False, font=dict(size=10, color="#374151"),
-                               yanchor="top")
-
-        # ── 제동거리: 양수 실선 → 음수 동일색 점선으로 자연스럽게 연장 ──
+        # 제동거리 (이차함수)
         fig_dv.add_trace(go.Scatter(
-            x=v_full[v_full>=0], y=d_brake_full[v_full>=0],
-            name="제동거리",
+            x=v_plot, y=d_b_curve,
+            name="제동거리  d = v²/(2μg)",
             line=dict(color=col_cur, width=3),
-            fill="tozeroy", fillcolor="rgba(37,99,235,0.07)",
-            hovertemplate="v=%{x:.1f}km/h<br>d=%{y:.1f}m<extra></extra>",
-        ))
-        fig_dv.add_trace(go.Scatter(
-            x=v_full[v_full<0], y=d_brake_full[v_full<0],
-            name="제동거리 (가상 연장)",
-            line=dict(color=col_cur, width=2.5, dash="dash"),
-            showlegend=True,
-            hovertemplate="v=%{x:.1f}km/h<br>d=%{y:.1f}m (가상)<extra></extra>",
+            fill="tozeroy", fillcolor="rgba(37,99,235,0.08)",
+            hovertemplate="v=%{x:.1f}km/h<br>제동=%{y:.1f}m<extra></extra>",
         ))
 
-        # ── 정지거리: 양수 실선 → 음수 동일색 점선으로 자연스럽게 연장 ──
+        # 반응거리 (일차함수) — 제동거리 위에 쌓임
         fig_dv.add_trace(go.Scatter(
-            x=v_full[v_full>=0], y=d_total_full[v_full>=0],
-            name="정지거리 (반응 포함)",
+            x=v_plot, y=d_t_curve,
+            name=f"정지거리  d = v·{t_react}s + v²/(2μg)",
             line=dict(color="#F59E0B", width=2.5),
+            fill="tonexty", fillcolor="rgba(245,158,11,0.12)",
             hovertemplate="v=%{x:.1f}km/h<br>정지=%{y:.1f}m<extra></extra>",
         ))
-        fig_dv.add_trace(go.Scatter(
-            x=v_full[v_full<0], y=d_total_full[v_full<0],
-            name="정지거리 (가상 연장)",
-            line=dict(color="#F59E0B", width=2, dash="dash"),
-            showlegend=False,
-            hovertemplate="v=%{x:.1f}km/h<br>정지=%{y:.1f}m (가상)<extra></extra>",
-        ))
-
-        # v=0 수직선
-        fig_dv.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, yref="paper",
-                         line=dict(dash="dot", color="#374151", width=1.5))
 
         # 현재 속도 마커
         fig_dv.add_trace(go.Scatter(
-            x=[speed_kmh, -speed_kmh],
-            y=[d_b, d_b],
-            mode="markers",
-            marker=dict(size=12, color="#7C3AED", symbol="star"),
-            name=f"현재 ±{speed_kmh}km/h → {d_b:.1f}m",
+            x=[speed_kmh], y=[d_b],
+            mode="markers", marker=dict(size=12, color=col_cur, symbol="star",
+                                        line=dict(width=2, color="white")),
+            name=f"현재 제동 {d_b:.1f}m", showlegend=True,
+        ))
+        fig_dv.add_trace(go.Scatter(
+            x=[speed_kmh], y=[d_b + d_r],
+            mode="markers", marker=dict(size=12, color="#F59E0B", symbol="star",
+                                        line=dict(width=2, color="white")),
+            name=f"현재 정지 {d_tot:.1f}m", showlegend=True,
         ))
 
+        # 현재 속도 수직선
+        fig_dv.add_shape(type="line", x0=speed_kmh, x1=speed_kmh,
+                         y0=0, y1=1, yref="paper",
+                         line=dict(dash="dash", color="#6B7280", width=1.2))
+
+        # 공식 주석
+        mid_v = 50
+        mid_vm = mid_v / 3.6
+        fig_dv.add_annotation(
+            x=mid_v, y=mid_vm**2/(2*decel)*0.6,
+            text=f"d = v²/{2*decel:.1f}<br>(이차함수)",
+            showarrow=False, font=dict(size=10, color=col_cur),
+            bgcolor="rgba(255,255,255,0.8)",
+        )
+
         fig_dv.update_layout(
-            **blayout("제동거리 – 속력 (음수 포함)", "속력 v (km/h)", "거리 d (m)")
+            **blayout("제동거리·정지거리 – 속력", "속력 v (km/h)", "거리 d (m)")
         )
         st.plotly_chart(fig_dv, use_container_width=True)
         st.caption(
-            f"d = v²/(2μg) 는 v에 대한 **완전한 포물선(이차함수)**  "
-            f"·  d(−v) = d(v) 대칭  ·  꼭짓점 (0, 0)"
+            f"🔵 제동거리 = v²/(2μg) [이차함수]  "
+            f"🟡 반응거리 = v × {t_react}s [일차함수]  "
+            f"→ 정지거리 = 두 합"
         )
 
-    # ── 오른쪽: v-t 그래프 (음수 연장) ──────────────
+    # ── 오른쪽: 반응시간별 정지거리 곡선 비교 ──────────
     with tr:
-        ext_dur = t_br * 0.7   # 정지 이후 연장 시간
-        t_ext   = t_tot + ext_dur
+        T_LIST   = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+        T_COLORS = ["#CBD5E1","#93C5FD","#60A5FA","#3B82F6",
+                    "#F59E0B","#EF4444","#7C3AED"]
 
-        t1 = np.linspace(0,       t_react, 50)
-        t2 = np.linspace(t_react, t_tot,   100)
-        t3 = np.linspace(t_tot,   t_ext,   60)
+        fig_tr = go.Figure()
 
-        v1 = np.full(50,  v0*3.6)
-        v2 = np.maximum(0, (v0 - decel*(t2-t_react))*3.6)
-        v3_theory = (v0 - decel*(t3-t_react))*3.6   # 음수 진입
-        v3_real   = np.zeros(60)                     # 실제 정지
-
-        fig_vt = go.Figure()
-
-        # 반응 구간
-        fig_vt.add_trace(go.Scatter(
-            x=t1, y=v1, name="반응 구간",
-            line=dict(color="#16A34A", width=2.5),
-            fill="tozeroy", fillcolor="rgba(22,163,74,0.08)",
-            hovertemplate="t=%{x:.2f}s<br>v=%{y:.1f}km/h<extra></extra>",
+        # 순수 제동거리 기준선
+        fig_tr.add_trace(go.Scatter(
+            x=v_plot, y=d_b_curve,
+            name="반응 0s (제동거리만)",
+            line=dict(color="#CBD5E1", width=2, dash="dot"),
+            hovertemplate="반응0s<br>v=%{x:.1f}km/h<br>d=%{y:.1f}m<extra></extra>",
         ))
 
-        # 제동 구간
-        fig_vt.add_trace(go.Scatter(
-            x=t2, y=v2, name="제동 구간",
-            line=dict(color="#DC2626", width=2.5),
-            fill="tozeroy", fillcolor="rgba(220,38,38,0.08)",
-            hovertemplate="t=%{x:.2f}s<br>v=%{y:.1f}km/h<extra></extra>",
-        ))
+        for t_val, col in zip(T_LIST[1:], T_COLORS[1:]):
+            d_stop = v_ms_p * t_val + d_b_curve
+            lw  = 3.5 if abs(t_val - t_react) < 0.05 else 1.8
+            fig_tr.add_trace(go.Scatter(
+                x=v_plot, y=d_stop,
+                name=f"반응 {t_val}s",
+                line=dict(color=col, width=lw),
+                hovertemplate=f"반응{t_val}s<br>v=%{{x:.1f}}km/h<br>d=%{{y:.1f}}m<extra></extra>",
+            ))
 
-        # 실제: 정지 유지
-        fig_vt.add_trace(go.Scatter(
-            x=t3, y=v3_real, name="실제 (정지)",
-            line=dict(color="#374151", width=2.5),
-        ))
+        # 현재 반응시간 강조 마커
+        d_cur_stop = v_ms_p * t_react + d_b_curve
+        # (마커는 선 두께로 강조)
 
-        # 이론 연장 (음수 구간)
-        fig_vt.add_trace(go.Scatter(
-            x=t3, y=v3_theory, name="이론값 (멈추지 않는다면)",
-            line=dict(color="#DC2626", width=2, dash="dash"),
-            fill="tozeroy", fillcolor="rgba(220,38,38,0.05)",
-            hovertemplate="t=%{x:.2f}s<br>이론v=%{y:.1f}km/h<extra></extra>",
-        ))
-
-        # v=0 수평선
-        fig_vt.add_shape(type="line", x0=0, x1=1, xref="paper",
-                         y0=0, y1=0,
+        # 현재 속도 수직선
+        fig_tr.add_shape(type="line", x0=speed_kmh, x1=speed_kmh,
+                         y0=0, y1=1, yref="paper",
                          line=dict(dash="dash", color="#6B7280", width=1.2))
-
-        # 정지점
-        fig_vt.add_trace(go.Scatter(
-            x=[t_tot], y=[0], mode="markers+text",
-            marker=dict(size=13, color="#7C3AED", symbol="star",
-                        line=dict(width=2, color="white")),
-            text=[f"  정지 ({t_tot:.2f}s)"],
-            textposition="middle right",
-            textfont=dict(size=10, color="#7C3AED"),
-            name="정지점",
-        ))
-
-        # 음수 구간 배경
-        y_min = v3_theory[-1] * 1.3
-        fig_vt.add_shape(type="rect",
-                         x0=t_tot, x1=t_ext,
-                         y0=y_min, y1=0,
-                         fillcolor="rgba(220,38,38,0.04)", line_width=0)
-        fig_vt.add_annotation(
-            x=(t_tot+t_ext)/2, y=y_min*0.5,
-            text="음수 속력 영역<br>(이론값)",
-            showarrow=False, font=dict(size=10, color="#DC2626"),
+        fig_tr.add_annotation(
+            x=speed_kmh, y=1, yref="paper",
+            text=f"  현재 {speed_kmh}km/h",
+            showarrow=False, font=dict(size=10), xanchor="left",
         )
 
-        ly = blayout("속력 – 시간 (정지 이후 연장)", "시간 t (s)", "속력 v (km/h)")
-        fig_vt.update_layout(**ly)
-        st.plotly_chart(fig_vt, use_container_width=True)
+        # 반응거리 차이 표시 (두 특정 곡선 사이 간격)
+        v_mark = speed_kmh / 3.6
+        d_br_mark = v_mark**2 / (2*decel)
+        d_tot_mark = v_mark * t_react + d_br_mark
+        fig_tr.add_shape(type="line",
+                         x0=speed_kmh, x1=speed_kmh,
+                         y0=d_br_mark, y1=d_tot_mark,
+                         line=dict(color="#16A34A", width=3))
+        fig_tr.add_annotation(
+            x=speed_kmh + 3, y=(d_br_mark + d_tot_mark)/2,
+            text=f"+{d_r:.1f}m<br>(반응거리)",
+            showarrow=False, font=dict(size=10, color="#16A34A"),
+            xanchor="left",
+        )
+
+        fig_tr.update_layout(
+            **blayout(f"반응시간별 정지거리 비교 (현재 {t_react}s 굵게)",
+                      "속력 v (km/h)", "정지거리 (m)")
+        )
+        st.plotly_chart(fig_tr, use_container_width=True)
         st.caption(
-            "점선 = 마찰이 계속 작용한다면 속력이 음수가 됨  "
-            "·  실제로는 v=0에서 정적 마찰이 차를 붙잡음"
+            "반응시간이 클수록 곡선이 위로 이동 (간격 = v × Δt, 속력에 비례)  "
+            f"·  현재 {speed_kmh}km/h에서 반응거리 = **{d_r:.1f}m**"
         )
 
 # ══════════════════════════════════════════════
