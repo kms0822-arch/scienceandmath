@@ -196,126 +196,160 @@ tab1, tab2, tab3, tab4 = st.tabs([
 ])
 
 # ══════════════════════════════════════════════
-# Tab 1 — 이차함수 평행이동
+# Tab 1 — 이차함수 평행이동 (시간축)
 # ══════════════════════════════════════════════
 with tab1:
-    st.markdown("#### s = vt + v²/(2μg) : 반응시간에 따른 이차함수 평행이동")
+    st.markdown("#### s(t) = v₀t − ½a(t−t_반응)² : 반응시간에 따른 이차함수 평행이동")
     st.caption(
-        "s(v) = v²/(2μg) + v·t 는 v에 관한 **이차함수**  ·  "
-        "반응시간 t가 커질수록 꼭짓점이 왼쪽 아래로 **평행이동**  ·  "
-        "점선 = 음수 속력 구간 가상 연장 (완전한 포물선 모양 확인)"
+        "t를 x축으로 놓으면 s(t) = v₀t − ½a(t−t_반응)² 는 **t에 관한 이차함수(포물선)**  ·  "
+        "반응시간이 Δt 늘어날수록 포물선이 (+Δt, +v₀Δt) 방향으로 **평행이동**  ·  "
+        "점선 = 제동 시작 전/후 가상 연장 → 완전한 포물선(∩) 모양 확인"
     )
-
-    # 속력 범위 (음수 포함)
-    v_ext    = np.linspace(-90, 90, 600)  # km/h
-    v_ext_ms = v_ext / 3.6
 
     T_LIST   = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
     T_COLORS = ["#94A3B8","#60A5FA","#2563EB","#16A34A",
                 "#F59E0B","#EF4444","#7C3AED"]
 
-    fig_para = go.Figure()
+    ext_a   = t_br * 0.7   # 정지 이후 연장
+    t_min_p = -t_br * 0.25
+    t_max_p = max(T_LIST) + t_br + ext_a
+    t_range = np.linspace(t_min_p, t_max_p, 700)
+
+    fig_time = go.Figure()
 
     # 기준 축선
-    fig_para.add_shape(type="line", x0=-90, x1=90, y0=0, y1=0,
+    fig_time.add_shape(type="line", x0=t_min_p, x1=t_max_p, y0=0, y1=0,
                        line=dict(color="#94A3B8", width=1, dash="dot"))
-    fig_para.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, yref="paper",
+    fig_time.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, yref="paper",
                        line=dict(color="#94A3B8", width=1, dash="dot"))
 
-    for t_val, col in zip(T_LIST, T_COLORS):
-        s_full = v_ext_ms**2 / (2*decel) + v_ext_ms * t_val
+    s_collected = []
 
-        lw = 3.5 if abs(t_val - t_react) < 0.05 else 1.8
+    for t_r_val, col in zip(T_LIST, T_COLORS):
+        lw = 3.5 if abs(t_r_val - t_react) < 0.05 else 1.8
 
-        # 음수 속력 구간 → 같은 색 점선 (가상 연장)
-        mask_neg = v_ext < 0
-        fig_para.add_trace(go.Scatter(
-            x=v_ext[mask_neg], y=s_full[mask_neg],
-            showlegend=False,
-            line=dict(color=col, width=lw*0.85, dash="dash"),
-            hovertemplate=f"반응 {t_val}s<br>v=%{{x:.1f}}km/h<br>s=%{{y:.1f}}m (가상)<extra></extra>",
-        ))
+        # 포물선 공식: s(t) = v0*t - 0.5*decel*(t - t_r_val)^2
+        s_all = v0 * t_range - 0.5 * decel * (t_range - t_r_val) ** 2
+        s_collected.extend(s_all.tolist())
 
-        # 양수 속력 구간 → 실선 (실제)
-        mask_pos = v_ext >= 0
-        fig_para.add_trace(go.Scatter(
-            x=v_ext[mask_pos], y=s_full[mask_pos],
-            name=f"t = {t_val}s",
-            line=dict(color=col, width=lw),
-            hovertemplate=f"반응 {t_val}s<br>v=%{{x:.1f}}km/h<br>s=%{{y:.1f}}m<extra></extra>",
-        ))
+        mask_solid  = (t_range >= t_r_val) & (t_range <= t_r_val + t_br)
+        mask_before = t_range < t_r_val
+        mask_after  = t_range > t_r_val + t_br
 
-        # 꼭짓점 마커 (다이아몬드)
-        v_vrt_ms  = -t_val * decel          # 꼭짓점 속력 (m/s)
-        s_vrt     = v_vrt_ms**2/(2*decel) + v_vrt_ms * t_val
-        v_vrt_kmh = v_vrt_ms * 3.6
-        if -90 <= v_vrt_kmh <= 90:
-            fig_para.add_trace(go.Scatter(
-                x=[v_vrt_kmh], y=[s_vrt],
-                mode="markers", showlegend=False,
-                marker=dict(size=9, color=col, symbol="diamond",
-                            line=dict(width=1.5, color="white")),
-                hovertemplate=(
-                    f"꼭짓점 (t={t_val}s)<br>"
-                    f"v = {v_vrt_kmh:.1f} km/h<br>"
-                    f"s = {s_vrt:.2f} m<extra></extra>"
-                ),
+        # 점선: 제동 시작 전 (가상 연장)
+        if mask_before.any():
+            fig_time.add_trace(go.Scatter(
+                x=t_range[mask_before], y=s_all[mask_before],
+                showlegend=False,
+                line=dict(color=col, width=lw * 0.85, dash="dash"),
+                hovertemplate=f"반응 {t_r_val}s<br>t=%{{x:.2f}}s<br>s=%{{y:.1f}}m (가상)<extra></extra>",
             ))
 
-    # 꼭짓점 이동 경로 (점선 연결)
-    v_vrt_path = [-t*decel*3.6 for t in T_LIST]
-    s_vrt_path = [(-t*decel)**2/(2*decel) + (-t*decel)*t for t in T_LIST]
-    fig_para.add_trace(go.Scatter(
-        x=v_vrt_path, y=s_vrt_path,
+        # 실선: 실제 제동 구간
+        fig_time.add_trace(go.Scatter(
+            x=t_range[mask_solid], y=s_all[mask_solid],
+            name=f"t_반응 = {t_r_val}s",
+            line=dict(color=col, width=lw),
+            hovertemplate=f"반응 {t_r_val}s<br>t=%{{x:.2f}}s<br>s=%{{y:.1f}}m<extra></extra>",
+        ))
+
+        # 점선: 정지 이후 (가상 연장)
+        if mask_after.any():
+            fig_time.add_trace(go.Scatter(
+                x=t_range[mask_after], y=s_all[mask_after],
+                showlegend=False,
+                line=dict(color=col, width=lw * 0.85, dash="dash"),
+                hovertemplate=f"반응 {t_r_val}s<br>t=%{{x:.2f}}s<br>s=%{{y:.1f}}m (가상)<extra></extra>",
+            ))
+
+        # 꼭짓점 마커 (다이아몬드)
+        t_vert = t_r_val + t_br
+        s_vert = v0 * t_vert - 0.5 * decel * t_br ** 2
+        fig_time.add_trace(go.Scatter(
+            x=[t_vert], y=[s_vert],
+            mode="markers", showlegend=False,
+            marker=dict(size=9, color=col, symbol="diamond",
+                        line=dict(width=1.5, color="white")),
+            hovertemplate=(
+                f"꼭짓점 (반응 {t_r_val}s)<br>"
+                f"t = {t_vert:.2f}s<br>"
+                f"s = {s_vert:.1f}m<extra></extra>"
+            ),
+        ))
+
+        # 반응 구간 점선 (실제 물리적 직선)
+        if t_r_val > 0:
+            t_rp = np.linspace(max(0.0, t_r_val - 0.01), t_r_val, 30)
+            fig_time.add_trace(go.Scatter(
+                x=t_rp, y=v0 * t_rp,
+                showlegend=False,
+                line=dict(color=col, width=lw * 0.6, dash="dot"),
+            ))
+
+    # 꼭짓점 이동 경로
+    t_verts_list = [tr + t_br for tr in T_LIST]
+    s_verts_list = [v0 * (tr + t_br) - 0.5 * decel * t_br ** 2 for tr in T_LIST]
+    fig_time.add_trace(go.Scatter(
+        x=t_verts_list, y=s_verts_list,
         mode="lines", name="꼭짓점 이동 경로",
         line=dict(color="#374151", width=1.5, dash="dot"),
-        hovertemplate="꼭짓점<br>v=%{x:.1f}km/h<br>s=%{y:.2f}m<extra></extra>",
+        hovertemplate="꼭짓점<br>t=%{x:.2f}s<br>s=%{y:.1f}m<extra></extra>",
     ))
 
-    # 현재 속도 수직선
-    fig_para.add_shape(type="line", x0=speed_kmh, x1=speed_kmh,
+    # 평행이동 화살표 (t_r=0 꼭짓점 → 현재 t_react 꼭짓점)
+    if t_react > 0.01:
+        t_v0  = t_br
+        s_v0  = v0 * t_br - 0.5 * decel * t_br ** 2
+        t_vcr = t_react + t_br
+        s_vcr = v0 * (t_react + t_br) - 0.5 * decel * t_br ** 2
+        fig_time.add_annotation(
+            ax=t_v0, ay=s_v0, axref="x", ayref="y",
+            x=t_vcr, y=s_vcr,
+            arrowhead=3, arrowcolor="#374151", arrowwidth=2,
+            text=f"  (+{t_react}s, +{d_r:.1f}m)",
+            font=dict(size=10, color="#374151"),
+        )
+
+    # 현재 반응시간 수직선
+    fig_time.add_shape(type="line", x0=t_react, x1=t_react,
                        y0=0, y1=1, yref="paper",
                        line=dict(dash="dash", color="#7C3AED", width=1.5))
-    fig_para.add_annotation(
-        x=speed_kmh+1, y=0.97, yref="paper",
-        text=f"현재 {speed_kmh}km/h",
+    fig_time.add_annotation(
+        x=t_react + 0.05, y=0.97, yref="paper",
+        text=f"현재 반응시간 {t_react}s",
         showarrow=False, font=dict(size=10, color="#7C3AED"), xanchor="left",
     )
 
-    # 현재 t_react 의 현재 속도 마커
-    s_cur = (speed_kmh/3.6)**2/(2*decel) + (speed_kmh/3.6)*t_react
-    fig_para.add_trace(go.Scatter(
-        x=[speed_kmh], y=[s_cur],
-        mode="markers", name=f"현재값 {s_cur:.1f}m",
-        marker=dict(size=13, color="#7C3AED", symbol="star",
-                    line=dict(width=2, color="white")),
-    ))
+    s_arr  = np.array(s_collected)
+    y_lo   = max(float(s_arr.min()) * 1.2, -d_b * 0.7)
+    y_hi   = float(s_arr.max()) * 1.1
 
-    fig_para.update_layout(
-        **blayout("s = vt + v²/(2μg)  —  반응시간별 평행이동",
-                  "초기 속력 v (km/h)", "정지거리 s (m)", h=480),
+    fig_time.update_layout(
+        **blayout("s(t) = v₀t − ½a(t−t_반응)²  반응시간별 평행이동",
+                  "시간 t (s)", "정지거리 s (m)", h=500),
     )
-    st.plotly_chart(fig_para, use_container_width=True)
+    fig_time.update_yaxes(range=[y_lo, y_hi])
+    st.plotly_chart(fig_time, use_container_width=True)
 
     st.caption(
-        "🔷 다이아몬드 = 꼭짓점  ·  점선 연결 = 꼭짓점 이동 경로  "
-        f"꼭짓점: v = −μg·t,  s = −μg·t²/2  →  t가 클수록 왼쪽·아래로 이동"
+        f"🔷 다이아몬드 = 꼭짓점  ·  점선 연결 = 꼭짓점 이동 경로  "
+        f"반응 1s 증가 → 오른쪽 +1s, 위로 +{v0:.1f}m 평행이동  ·  "
+        f"현재 속력 v₀ = {speed_kmh}km/h = {v0:.2f}m/s"
     )
 
-    with st.expander("📐 평행이동 공식 전개"):
-        cur_vv_kmh = -decel * t_react * 3.6
-        cur_sv     = -decel * t_react**2 / 2
+    with st.expander("📐 평행이동 수학적 증명"):
         st.markdown(
-            f"**기본 포물선** (t=0): s = v²/(2μg) — 꼭짓점 (0, 0)\n\n"
-            f"**완전제곱 변환**: s = (v + μg·t)²/(2μg) − μg·t²/2\n\n"
-            f"→ 꼭짓점이 (0, 0) 에서 (−μg·t, −μg·t²/2) 로 **평행이동**\n\n"
-            f"**현재 조건** t={t_react}s, μg={decel:.2f} m/s² :\n\n"
-            f"꼭짓점  v = **{cur_vv_kmh:.1f} km/h**,  s = **{cur_sv:.2f} m**"
+            f"**포물선**: s(t) = v₀·t − ½·a·(t − t_반응)²\n\n"
+            f"반응시간이 Δt 증가할 때 s(t+Δt) 계산:\n\n"
+            f"s(t+Δt, t_반응+Δt) = v₀·(t+Δt) − ½·a·(t+Δt − t_반응 − Δt)²\n\n"
+            f"= v₀·t − ½·a·(t−t_반응)² + v₀·Δt = **s(t) + v₀·Δt**\n\n"
+            f"→ x축 +Δt, y축 +v₀·Δt 방향으로 **평행이동**\n\n"
+            f"현재 v₀={v0:.2f}m/s → 반응 1s 증가마다 정지거리 +{v0:.1f}m"
         )
 
     st.markdown("---")
 
-    # v-t 그래프 (정지 이후 이론 연장)
+    # ── 속력-시간 그래프 (정지 이후 음수 연장) ──────────
     st.markdown("##### 속력 – 시간 그래프 (정지 이후 음수 속력 이론값 연장)")
     ext_dur   = t_br * 0.8
     t_ext_end = t_tot + ext_dur
@@ -363,12 +397,12 @@ with tab1:
         textfont=dict(size=10, color="#7C3AED"),
         name="정지점",
     ))
-    y_min = v3_theory[-1] * 1.3
+    y_vt_min = v3_theory[-1] * 1.3
     fig_vt.add_shape(type="rect", x0=t_tot, x1=t_ext_end,
-                     y0=y_min, y1=0,
+                     y0=y_vt_min, y1=0,
                      fillcolor="rgba(220,38,38,0.04)", line_width=0)
     fig_vt.add_annotation(
-        x=(t_tot+t_ext_end)/2, y=y_min*0.55,
+        x=(t_tot+t_ext_end)/2, y=y_vt_min*0.55,
         text="음수 속력 영역 (이론값)",
         showarrow=False, font=dict(size=10, color="#DC2626"),
     )
