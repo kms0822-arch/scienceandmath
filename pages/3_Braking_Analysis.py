@@ -1,6 +1,9 @@
 import streamlit as st
+import streamlit.components.v1 as components
 import plotly.graph_objects as go
 import numpy as np
+import html
+import json
 
 st.set_page_config(
     page_title="🔬 제동 변수 탐구",
@@ -64,6 +67,209 @@ d_r   = v0 * t_react
 d_b   = v0**2 / (2 * decel)
 d_tot = d_r + d_b
 F_fric = mu * mass * g   # 마찰력 (N)
+
+
+def make_vpython_code(v0, t_reaction, mass, mu, run_up_distance=80.0):
+    """현재 Streamlit 설정값을 Web VPython 코드에 반영해서 복사용 문자열로 반환"""
+    return """Web VPython 3.2
+
+# ==========================================
+# 1. 시뮬레이션 기본 변수 (현재 설정값 반영)
+# ==========================================
+v0 = {v0}            # 초기 속력 (m/s) = {v0_kmh} km/h
+t_reaction = {t_reaction}   # 반응 시간 (초)
+g = 9.8            # 중력가속도
+m = {mass}             # 질량 (kg)
+mu = {mu}           # 마찰계수
+
+run_up_distance = {run_up_distance} # 출발점부터 초록색 위험선까지 달려가는 고정 거리 (m)
+running = False
+
+# ==========================================
+# 2. 배경 및 노면(바닥) 설정
+# ==========================================
+scene.width = 800
+scene.height = 400
+scene.background = color.cyan # 맑은 하늘색
+
+road = box(pos=vector(200, -0.1, 0), size=vector(500, 0.2, 40), 
+           color=color.gray(0.6), texture=textures.rough)
+
+start_line = box(pos=vector(0, 0, 0), size=vector(0.5, 1.0, 30), color=color.white)
+danger_line = box(pos=vector(run_up_distance, 0, 0), size=vector(0.5, 1.0, 30), color=color.green)
+brake_line = box(pos=vector(run_up_distance + v0 * t_reaction, 0, 0), size=vector(0.5, 1.0, 30), color=color.yellow)
+
+# ==========================================
+# 3. 디테일한 자전거 조립 (초대형 사이즈)
+# ==========================================
+bike_scale = 15.0
+
+def make_wheel():
+    w = ring(axis=vector(0,0,1), radius=0.4*bike_scale, thickness=0.04*bike_scale, color=color.black)
+    spoke1 = cylinder(axis=vector(0.8*bike_scale,0,0), pos=vector(-0.4*bike_scale,0,0), radius=0.015*bike_scale, color=color.white)
+    spoke2 = cylinder(axis=vector(0,0.8*bike_scale,0), pos=vector(0,-0.4*bike_scale,0), radius=0.015*bike_scale, color=color.white)
+    return compound([w, spoke1, spoke2])
+
+wheel_rear = make_wheel()
+wheel_front = make_wheel()
+
+n1 = vector(-0.6*bike_scale, 0.4*bike_scale, 0)
+n2 = vector(0, 0.4*bike_scale, 0)
+n3 = vector(-0.2*bike_scale, 1.0*bike_scale, 0)
+n4 = vector(0.4*bike_scale, 1.1*bike_scale, 0)
+n5 = vector(0.6*bike_scale, 0.4*bike_scale, 0)
+
+parts = []
+frame_r = 0.03 * bike_scale
+
+parts.append(cylinder(pos=n1, axis=n2-n1, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n2, axis=n3-n2, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n3, axis=n1-n3, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n3, axis=n4-n3, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n2, axis=n4-n2, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n4, axis=n5-n4, radius=frame_r, color=color.red))
+parts.append(box(pos=n3 + vector(0, 0.05*bike_scale, 0), size=vector(0.3*bike_scale, 0.1*bike_scale, 0.15*bike_scale), color=color.black))
+parts.append(cylinder(pos=n4 + vector(0, 0, -0.3*bike_scale), axis=vector(0, 0, 0.6*bike_scale), radius=frame_r, color=color.black))
+parts.append(sphere(pos=n4 + vector(0.1*bike_scale, 0, 0), radius=0.08*bike_scale, color=color.yellow, emissive=True))
+
+bike_frame = compound(parts)
+
+def update_bike_pos(x):
+    bike_frame.pos.x = x
+    wheel_rear.pos = n1 + vector(x, 0, 0)
+    wheel_front.pos = n5 + vector(x, 0, 0)
+
+update_bike_pos(0)
+
+max_distance = run_up_distance + (v0 * t_reaction) + (v0**2)/(2 * mu * g)
+scene.center = vector(max_distance / 2, 0.5 * bike_scale, 0)
+
+# ==========================================
+# 4. UI (다시하기 버튼)
+# ==========================================
+def toggle_run(b):
+    global running
+    running = True 
+
+scene.append_to_caption('\n')
+button(text='▶ 시뮬레이션 시작 / 다시하기', bind=toggle_run, background=color.orange)
+scene.append_to_caption('\n\n')
+
+# ==========================================
+# 5. 그래프 설정
+# ==========================================
+g1 = graph(title='<b>Position-Time Graph</b> (검은선:주행 / 파란선:반응 / 빨간선:제동)', xtitle='Time (s)', ytitle='Position (m)', width=800, height=200)
+g2 = graph(title='<b>Energy Conservation</b>', xtitle='Time (s)', ytitle='Energy (J)', width=800, height=200)
+
+pos_curve = gcurve(graph=g1, color=color.black, width=2)
+ke_curve = gcurve(graph=g2, color=color.orange, label='Kinetic Energy')
+work_curve = gcurve(graph=g2, color=color.red, label='Friction Work')
+total_e_curve = gcurve(graph=g2, color=color.green, label='Total Energy')
+
+# ==========================================
+# 6. 메인 애니메이션 루프
+# ==========================================
+while True:
+    rate(60) 
+    
+    if running:
+        current_v = v0
+        current_x = 0
+        t = 0
+        dt = 0.01
+        work_friction = 0
+        update_bike_pos(current_x)
+        
+        t_danger = run_up_distance / v0
+        t_brake = t_danger + t_reaction
+        brake_line.pos.x = run_up_distance + v0 * t_reaction
+        
+        pos_curve.delete()
+        ke_curve.delete()
+        work_curve.delete()
+        total_e_curve.delete()
+        pos_curve = gcurve(graph=g1, color=color.black, width=2)
+        ke_curve = gcurve(graph=g2, color=color.orange, label='Kinetic Energy')
+        work_curve = gcurve(graph=g2, color=color.red, label='Friction Work')
+        total_e_curve = gcurve(graph=g2, color=color.green, label='Total Energy')
+        
+        while current_v > 0 and running:
+            rate(400)
+            
+            if t < t_danger:
+                a = 0
+                pos_curve.color = color.black
+            elif t < t_brake:
+                a = 0
+                pos_curve.color = color.blue 
+            else:
+                a = -mu * g
+                pos_curve.color = color.red  
+                distance_moved = current_v * dt
+                work_friction += (mu * m * g) * distance_moved
+            
+            current_v += a * dt
+            if current_v < 0:
+                current_v = 0 
+            
+            current_x += current_v * dt
+            update_bike_pos(current_x)
+            
+            current_radius = 0.4 * bike_scale
+            d_theta = (current_v / current_radius) * dt
+            wheel_front.rotate(angle=-d_theta, axis=vector(0,0,1))
+            wheel_rear.rotate(angle=-d_theta, axis=vector(0,0,1))
+            
+            KE = 0.5 * m * (current_v**2)
+            pos_curve.plot(t, current_x)
+            ke_curve.plot(t, KE)
+            work_curve.plot(t, work_friction)
+            total_e_curve.plot(t, KE + work_friction)
+            
+            t += dt
+            
+        running = False
+""".format(
+        v0=format(v0, ".6g"),
+        v0_kmh=format(v0 * 3.6, ".1f"),
+        t_reaction=format(t_reaction, ".6g"),
+        mass=format(mass, ".6g"),
+        mu=format(mu, ".6g"),
+        run_up_distance=format(run_up_distance, ".6g"),
+    )
+
+# ─────────────────────────────────────────────
+# Web VPython 코드 복사 칸
+# ─────────────────────────────────────────────
+vpython_code = make_vpython_code(v0=v0, t_reaction=t_react, mass=mass, mu=mu, run_up_distance=80.0)
+
+with st.expander("🧩 현재 설정값이 반영된 Web VPython 코드 복사하기", expanded=False):
+    left_code, right_copy = st.columns([5, 1])
+    with left_code:
+        st.code(vpython_code, language="python")  # Streamlit 기본 copy 아이콘도 표시됨
+    with right_copy:
+        st.download_button(
+            "💾 .py 저장",
+            data=vpython_code,
+            file_name="braking_vpython_current_settings.py",
+            mime="text/x-python",
+            use_container_width=True,
+        )
+
+    code_json = json.dumps(vpython_code)
+    components.html(
+        f"""
+        <button onclick='navigator.clipboard.writeText({code_json}).then(() => {{
+            const b = document.getElementById("copy-vpy-btn");
+            b.innerText = "✅ 복사 완료";
+            setTimeout(() => b.innerText = "📋 VPython 코드 복사하기", 1600);
+        }})' id="copy-vpy-btn" style="
+            width:100%; padding:0.75rem 1rem; border:0; border-radius:0.5rem;
+            background:#f97316; color:white; font-weight:700; cursor:pointer;
+        ">📋 VPython 코드 복사하기</button>
+        """,
+        height=70,
+    )
 
 # ─────────────────────────────────────────────
 # KPI
