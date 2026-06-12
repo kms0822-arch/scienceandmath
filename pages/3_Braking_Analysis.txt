@@ -1,0 +1,904 @@
+import streamlit as st
+import streamlit.components.v1 as components
+import plotly.graph_objects as go
+import numpy as np
+import html
+import json
+
+st.set_page_config(
+    page_title="🔬 제동 변수 탐구",
+    page_icon="🔬",
+    layout="wide",
+)
+
+g = 9.8
+
+ROAD_INFO = {
+    "🌞 건조한 아스팔트": {"mu": 0.70, "color": "#2563EB"},   # 자전거 타이어 건식
+    "🌧️ 젖은 아스팔트":  {"mu": 0.40, "color": "#10B981"},   # 자전거 타이어 습식
+    "🌨️ 눈길":           {"mu": 0.20, "color": "#F59E0B"},   # 압설 위 자전거
+    "🧊 빙판":           {"mu": 0.06, "color": "#EF4444"},   # 결빙 노면
+    "🚵 자갈/흙길":      {"mu": 0.45, "color": "#7C3AED"},   # 비포장 MTB 노면
+}
+
+def blayout(title, xt, yt, h=360):
+    return dict(
+        title=dict(text=title, font=dict(size=13)),
+        xaxis_title=xt, yaxis_title=yt,
+        height=h, margin=dict(l=0, r=0, t=36, b=30),
+        legend=dict(
+            x=0.01, y=0.99,
+            xanchor="left", yanchor="top",
+            bgcolor="rgba(255,255,255,0.85)",
+            bordercolor="#E5E7EB", borderwidth=1,
+            font=dict(size=9),
+        ),
+        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)",
+        xaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.06)"),
+        yaxis=dict(showgrid=True, gridcolor="rgba(0,0,0,0.06)"),
+    )
+
+# ─────────────────────────────────────────────
+# 헤더
+# ─────────────────────────────────────────────
+st.title("🚲 제동 변수 탐구 — 자전거 기준")
+st.caption("자전거(탑승자 포함) 기준 | 질량 · 반응시간 · 노면 상태 · 속도가 제동거리에 미치는 영향을 분석합니다")
+
+# ─────────────────────────────────────────────
+# 입력
+# ─────────────────────────────────────────────
+c1, c2, c3, c4 = st.columns(4)
+with c1:
+    speed_kmh = st.slider("🚲 초기 속도 (km/h)", 5, 80, 25, step=1)
+with c2:
+    t_react   = st.slider("⏱️ 반응 시간 (s)",    0.5, 3.0, 1.2, step=0.1)
+with c3:
+    mass      = st.slider("⚖️ 총 질량 (kg)  탑승자+자전거", 40, 150, 75, step=5,
+                          help="자전거(7~15kg) + 탑승자 체중 합산 | 제동거리 공식 d=v²/(2μg)에 질량이 없어요. 직접 바꿔보세요!")
+with c4:
+    road      = st.selectbox("🛣️ 기준 노면", list(ROAD_INFO.keys()))
+
+mu    = ROAD_INFO[road]["mu"]
+v0    = speed_kmh / 3.6
+decel = mu * g
+t_br  = v0 / decel
+t_tot = t_react + t_br
+d_r   = v0 * t_react
+d_b   = v0**2 / (2 * decel)
+d_tot = d_r + d_b
+F_fric = mu * mass * g   # 마찰력 (N)
+
+
+def make_vpython_code(v0, t_reaction, mass, mu, run_up_distance=80.0):
+    """현재 Streamlit 설정값을 Web VPython 코드에 반영해서 복사용 문자열로 반환"""
+    return """Web VPython 3.2
+
+# ==========================================
+# 1. 시뮬레이션 기본 변수 (현재 설정값 반영)
+# ==========================================
+v0 = {v0}            # 초기 속력 (m/s) = {v0_kmh} km/h
+t_reaction = {t_reaction}   # 반응 시간 (초)
+g = 9.8            # 중력가속도
+m = {mass}             # 질량 (kg)
+mu = {mu}           # 마찰계수
+
+run_up_distance = {run_up_distance} # 출발점부터 초록색 위험선까지 달려가는 고정 거리 (m)
+running = False
+
+# ==========================================
+# 2. 배경 및 노면(바닥) 설정
+# ==========================================
+scene.width = 800
+scene.height = 400
+scene.background = color.cyan # 맑은 하늘색
+
+road = box(pos=vector(200, -0.1, 0), size=vector(500, 0.2, 40), 
+           color=color.gray(0.6), texture=textures.rough)
+
+start_line = box(pos=vector(0, 0, 0), size=vector(0.5, 1.0, 30), color=color.white)
+danger_line = box(pos=vector(run_up_distance, 0, 0), size=vector(0.5, 1.0, 30), color=color.green)
+brake_line = box(pos=vector(run_up_distance + v0 * t_reaction, 0, 0), size=vector(0.5, 1.0, 30), color=color.yellow)
+
+# ==========================================
+# 3. 디테일한 자전거 조립 (초대형 사이즈)
+# ==========================================
+bike_scale = 15.0
+
+def make_wheel():
+    w = ring(axis=vector(0,0,1), radius=0.4*bike_scale, thickness=0.04*bike_scale, color=color.black)
+    spoke1 = cylinder(axis=vector(0.8*bike_scale,0,0), pos=vector(-0.4*bike_scale,0,0), radius=0.015*bike_scale, color=color.white)
+    spoke2 = cylinder(axis=vector(0,0.8*bike_scale,0), pos=vector(0,-0.4*bike_scale,0), radius=0.015*bike_scale, color=color.white)
+    return compound([w, spoke1, spoke2])
+
+wheel_rear = make_wheel()
+wheel_front = make_wheel()
+
+n1 = vector(-0.6*bike_scale, 0.4*bike_scale, 0)
+n2 = vector(0, 0.4*bike_scale, 0)
+n3 = vector(-0.2*bike_scale, 1.0*bike_scale, 0)
+n4 = vector(0.4*bike_scale, 1.1*bike_scale, 0)
+n5 = vector(0.6*bike_scale, 0.4*bike_scale, 0)
+
+parts = []
+frame_r = 0.03 * bike_scale
+
+parts.append(cylinder(pos=n1, axis=n2-n1, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n2, axis=n3-n2, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n3, axis=n1-n3, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n3, axis=n4-n3, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n2, axis=n4-n2, radius=frame_r, color=color.red))
+parts.append(cylinder(pos=n4, axis=n5-n4, radius=frame_r, color=color.red))
+parts.append(box(pos=n3 + vector(0, 0.05*bike_scale, 0), size=vector(0.3*bike_scale, 0.1*bike_scale, 0.15*bike_scale), color=color.black))
+parts.append(cylinder(pos=n4 + vector(0, 0, -0.3*bike_scale), axis=vector(0, 0, 0.6*bike_scale), radius=frame_r, color=color.black))
+parts.append(sphere(pos=n4 + vector(0.1*bike_scale, 0, 0), radius=0.08*bike_scale, color=color.yellow, emissive=True))
+
+bike_frame = compound(parts)
+
+def update_bike_pos(x):
+    bike_frame.pos.x = x
+    wheel_rear.pos = n1 + vector(x, 0, 0)
+    wheel_front.pos = n5 + vector(x, 0, 0)
+
+update_bike_pos(0)
+
+max_distance = run_up_distance + (v0 * t_reaction) + (v0**2)/(2 * mu * g)
+scene.center = vector(max_distance / 2, 0.5 * bike_scale, 0)
+
+# ==========================================
+# 4. UI (다시하기 버튼)
+# ==========================================
+def toggle_run(b):
+    global running
+    running = True 
+
+scene.append_to_caption('\n')
+button(text='▶ 시뮬레이션 시작 / 다시하기', bind=toggle_run, background=color.orange)
+scene.append_to_caption('\n\n')
+
+# ==========================================
+# 5. 그래프 설정
+# ==========================================
+g1 = graph(title='<b>Position-Time Graph</b> (검은선:주행 / 파란선:반응 / 빨간선:제동)', xtitle='Time (s)', ytitle='Position (m)', width=800, height=200)
+g2 = graph(title='<b>Energy Conservation</b>', xtitle='Time (s)', ytitle='Energy (J)', width=800, height=200)
+
+pos_curve = gcurve(graph=g1, color=color.black, width=2)
+ke_curve = gcurve(graph=g2, color=color.orange, label='Kinetic Energy')
+work_curve = gcurve(graph=g2, color=color.red, label='Friction Work')
+total_e_curve = gcurve(graph=g2, color=color.green, label='Total Energy')
+
+# ==========================================
+# 6. 메인 애니메이션 루프
+# ==========================================
+while True:
+    rate(60) 
+    
+    if running:
+        current_v = v0
+        current_x = 0
+        t = 0
+        dt = 0.01
+        work_friction = 0
+        update_bike_pos(current_x)
+        
+        t_danger = run_up_distance / v0
+        t_brake = t_danger + t_reaction
+        brake_line.pos.x = run_up_distance + v0 * t_reaction
+        
+        pos_curve.delete()
+        ke_curve.delete()
+        work_curve.delete()
+        total_e_curve.delete()
+        pos_curve = gcurve(graph=g1, color=color.black, width=2)
+        ke_curve = gcurve(graph=g2, color=color.orange, label='Kinetic Energy')
+        work_curve = gcurve(graph=g2, color=color.red, label='Friction Work')
+        total_e_curve = gcurve(graph=g2, color=color.green, label='Total Energy')
+        
+        while current_v > 0 and running:
+            rate(400)
+            
+            if t < t_danger:
+                a = 0
+                pos_curve.color = color.black
+            elif t < t_brake:
+                a = 0
+                pos_curve.color = color.blue 
+            else:
+                a = -mu * g
+                pos_curve.color = color.red  
+                distance_moved = current_v * dt
+                work_friction += (mu * m * g) * distance_moved
+            
+            current_v += a * dt
+            if current_v < 0:
+                current_v = 0 
+            
+            current_x += current_v * dt
+            update_bike_pos(current_x)
+            
+            current_radius = 0.4 * bike_scale
+            d_theta = (current_v / current_radius) * dt
+            wheel_front.rotate(angle=-d_theta, axis=vector(0,0,1))
+            wheel_rear.rotate(angle=-d_theta, axis=vector(0,0,1))
+            
+            KE = 0.5 * m * (current_v**2)
+            pos_curve.plot(t, current_x)
+            ke_curve.plot(t, KE)
+            work_curve.plot(t, work_friction)
+            total_e_curve.plot(t, KE + work_friction)
+            
+            t += dt
+            
+        running = False
+""".format(
+        v0=format(v0, ".6g"),
+        v0_kmh=format(v0 * 3.6, ".1f"),
+        t_reaction=format(t_reaction, ".6g"),
+        mass=format(mass, ".6g"),
+        mu=format(mu, ".6g"),
+        run_up_distance=format(run_up_distance, ".6g"),
+    )
+
+# ─────────────────────────────────────────────
+# Web VPython 코드 복사 칸
+# ─────────────────────────────────────────────
+vpython_code = make_vpython_code(v0=v0, t_reaction=t_react, mass=mass, mu=mu, run_up_distance=80.0)
+
+with st.expander("🧩 현재 설정값이 반영된 Web VPython 코드 복사하기", expanded=False):
+    left_code, right_copy = st.columns([5, 1])
+    with left_code:
+        st.code(vpython_code, language="python")  # Streamlit 기본 copy 아이콘도 표시됨
+    with right_copy:
+        st.download_button(
+            "💾 .py 저장",
+            data=vpython_code,
+            file_name="braking_vpython_current_settings.py",
+            mime="text/x-python",
+            use_container_width=True,
+        )
+
+    code_json = json.dumps(vpython_code)
+    components.html(
+        f"""
+        <button onclick='navigator.clipboard.writeText({code_json}).then(() => {{
+            const b = document.getElementById("copy-vpy-btn");
+            b.innerText = "✅ 복사 완료";
+            setTimeout(() => b.innerText = "📋 VPython 코드 복사하기", 1600);
+        }})' id="copy-vpy-btn" style="
+            width:100%; padding:0.75rem 1rem; border:0; border-radius:0.5rem;
+            background:#f97316; color:white; font-weight:700; cursor:pointer;
+        ">📋 VPython 코드 복사하기</button>
+        """,
+        height=70,
+    )
+
+# ─────────────────────────────────────────────
+# KPI
+# ─────────────────────────────────────────────
+k1,k2,k3,k4,k5,k6 = st.columns(6)
+k1.metric("🟢 반응거리",  f"{d_r:.1f} m")
+k2.metric("🔴 제동거리",  f"{d_b:.1f} m")
+k3.metric("📏 정지거리",  f"{d_tot:.1f} m")
+k4.metric("📉 감속도",    f"{decel:.2f} m/s²")
+k5.metric("🔧 마찰력",    f"{F_fric/1000:.1f} kN",
+          delta=f"= μ×(탑승자+자전거)×g = {mu}×{mass}×9.8")
+k6.metric("⚖️ 질량 영향", "없음 ✗",
+          help="F=μmg, a=F/m=μg → 질량 소거됨")
+
+st.divider()
+
+# ─────────────────────────────────────────────
+# 시뮬레이션 애니메이션
+# ─────────────────────────────────────────────
+st.markdown("### 🎬 제동 시뮬레이션")
+st.caption(f"반응 구간(🟢) {d_r:.1f}m  +  제동 구간(🔴) {d_b:.1f}m  =  정지거리 {d_tot:.1f}m")
+
+# 노면별 배경색
+ROAD_BG = {
+    "🌞 건조한 아스팔트": "rgba(241,245,249,0.95)",
+    "🌧️ 젖은 아스팔트":  "rgba(186,230,253,0.55)",
+    "🌨️ 눈길":           "rgba(240,253,255,0.95)",
+    "🧊 빙판":           "rgba(207,250,254,0.90)",
+    "🚵 자갈/흙길":      "rgba(245,230,210,0.70)",
+}
+anim_bg = ROAD_BG.get(road, "rgba(241,245,249,0.95)")
+
+# ★ 전체 구간을 균등 시간 간격으로 나눠 실제 속도와 동일하게
+N_total = 60
+t_all = np.linspace(0, t_tot, N_total)
+all_x = np.where(
+    t_all <= t_react,
+    v0 * t_all,
+    np.maximum(0, d_r + v0*(t_all - t_react) - 0.5*decel*(t_all - t_react)**2),
+)
+phases = ["r" if t <= t_react else "b" for t in t_all]
+all_v  = np.where(
+    t_all <= t_react,
+    float(speed_kmh),
+    np.maximum(0.0, (v0 - decel*(t_all - t_react)) * 3.6),
+)
+pad = d_tot * 0.1
+
+frames = []
+for i,(x,ph,spd) in enumerate(zip(all_x, phases, all_v)):
+    col = "#16A34A" if ph=="r" else "#DC2626"
+    frames.append(go.Frame(
+        data=[
+            go.Scatter(x=[-pad,d_tot+pad], y=[0,0], mode="lines",
+                       line=dict(color="#94A3B8",width=6), showlegend=False),
+            go.Scatter(x=[0,d_r,d_r,0], y=[-0.3,-0.3,0.3,0.3],
+                       fill="toself", fillcolor="rgba(22,163,74,0.07)",
+                       line=dict(width=0), showlegend=False),
+            go.Scatter(x=[d_r,d_tot,d_tot,d_r], y=[-0.3,-0.3,0.3,0.3],
+                       fill="toself", fillcolor="rgba(220,38,38,0.07)",
+                       line=dict(width=0), showlegend=False),
+            go.Scatter(x=[d_r,d_r], y=[-0.45,0.45], mode="lines",
+                       line=dict(color="#F59E0B",width=2,dash="dash"), showlegend=False),
+            go.Scatter(x=[d_tot,d_tot], y=[-0.45,0.45], mode="lines",
+                       line=dict(color="#DC2626",width=2.5), showlegend=False),
+            go.Scatter(x=[x], y=[0], mode="markers",
+                       marker=dict(size=26,color=col,symbol="square",
+                                   line=dict(width=2,color="white")), showlegend=False),
+            go.Scatter(x=[x], y=[0.6], mode="text",
+                       text=[f"{spd:.1f} km/h"],
+                       textfont=dict(size=12,color=col), showlegend=False),
+            go.Scatter(x=[x], y=[-0.6], mode="text",
+                       text=[f"{mass} kg"],
+                       textfont=dict(size=10,color="#94A3B8"), showlegend=False),
+        ], name=str(i)
+    ))
+
+fig_anim = go.Figure(
+    data=[
+        go.Scatter(x=[-pad,d_tot+pad],y=[0,0],mode="lines",
+                   line=dict(color="#94A3B8",width=6),showlegend=False),
+        go.Scatter(x=[0,d_r,d_r,0],y=[-0.3,-0.3,0.3,0.3],fill="toself",
+                   fillcolor="rgba(22,163,74,0.07)",line=dict(width=0),showlegend=False),
+        go.Scatter(x=[d_r,d_tot,d_tot,d_r],y=[-0.3,-0.3,0.3,0.3],fill="toself",
+                   fillcolor="rgba(220,38,38,0.07)",line=dict(width=0),showlegend=False),
+        go.Scatter(x=[d_r,d_r],y=[-0.45,0.45],mode="lines",
+                   line=dict(color="#F59E0B",width=2,dash="dash"),name="반응 끝"),
+        go.Scatter(x=[d_tot,d_tot],y=[-0.45,0.45],mode="lines",
+                   line=dict(color="#DC2626",width=2.5),name="정지선"),
+        go.Scatter(x=[0],y=[0],mode="markers",
+                   marker=dict(size=26,color="#16A34A",symbol="square",
+                               line=dict(width=2,color="white")),showlegend=False),
+        go.Scatter(x=[0],y=[0.6],mode="text",text=[f"{speed_kmh} km/h"],
+                   textfont=dict(size=12,color="#16A34A"),showlegend=False),
+        go.Scatter(x=[0],y=[-0.6],mode="text",text=[f"{mass} kg"],
+                   textfont=dict(size=10,color="#94A3B8"),showlegend=False),
+    ],
+    frames=frames,
+)
+fig_anim.update_layout(
+    height=220, margin=dict(l=10,r=10,t=10,b=70),
+    xaxis=dict(range=[-pad, d_tot+pad*2], title="거리 (m)", showgrid=False),
+    yaxis=dict(range=[-1,1], showticklabels=False, showgrid=False, zeroline=False),
+    legend=dict(orientation="h", y=1.1, font=dict(size=11)),
+    plot_bgcolor=anim_bg, paper_bgcolor="rgba(0,0,0,0)",
+    updatemenus=[dict(
+        type="buttons", showactive=False, y=-0.3, x=0.5, xanchor="center",
+        buttons=[
+            dict(label="▶ 재생", method="animate",
+                 args=[None,{"frame":{"duration": round(t_tot*1000/N_total),
+                                      "redraw":True},
+                             "fromcurrent":True,"transition":{"duration":0}}]),
+            dict(label="⏹ 정지", method="animate",
+                 args=[[None],{"frame":{"duration":0},"mode":"immediate"}]),
+        ],
+    )],
+)
+st.plotly_chart(fig_anim, use_container_width=True)
+
+st.divider()
+
+# ─────────────────────────────────────────────
+# 탭 분석
+# ─────────────────────────────────────────────
+tab1, tab2, tab3, tab4 = st.tabs([
+    "📐 이차함수 평행이동 분석",
+    "🛣️ 마찰계수 비교",
+    "⏱️ 반응시간 비교",
+    "⚖️ 질량 무관성",
+])
+
+# ══════════════════════════════════════════════
+# Tab 1 — 이차함수 평행이동 (시간축)
+# ══════════════════════════════════════════════
+with tab1:
+    st.markdown("#### s(t) = v₀t − ½a(t−t_반응)² : 반응시간에 따른 이차함수 평행이동")
+    st.caption(
+        "t를 x축으로 놓으면 s(t) = v₀t − ½a(t−t_반응)² 는 **t에 관한 이차함수(포물선)**  ·  "
+        "반응시간이 Δt 늘어날수록 포물선이 (+Δt, +v₀Δt) 방향으로 **평행이동**  ·  "
+        "점선 = 제동 시작 전/후 가상 연장 → 완전한 포물선(∩) 모양 확인"
+    )
+
+    T_LIST   = [0.0, 0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    T_COLORS = ["#94A3B8","#60A5FA","#2563EB","#16A34A",
+                "#F59E0B","#EF4444","#7C3AED"]
+
+    ext_a   = t_br * 0.7   # 정지 이후 연장
+    t_min_p = -t_br * 0.25
+    t_max_p = max(T_LIST) + t_br + ext_a
+    t_range = np.linspace(t_min_p, t_max_p, 700)
+
+    fig_time = go.Figure()
+
+    # 기준 축선
+    fig_time.add_shape(type="line", x0=t_min_p, x1=t_max_p, y0=0, y1=0,
+                       line=dict(color="#94A3B8", width=1, dash="dot"))
+    fig_time.add_shape(type="line", x0=0, x1=0, y0=0, y1=1, yref="paper",
+                       line=dict(color="#94A3B8", width=1, dash="dot"))
+
+    s_collected = []
+
+    for t_r_val, col in zip(T_LIST, T_COLORS):
+        lw = 3.5 if abs(t_r_val - t_react) < 0.05 else 1.8
+
+        # 포물선 공식: s(t) = v0*t - 0.5*decel*(t - t_r_val)^2
+        s_all = v0 * t_range - 0.5 * decel * (t_range - t_r_val) ** 2
+        s_collected.extend(s_all.tolist())
+
+        mask_solid  = (t_range >= t_r_val) & (t_range <= t_r_val + t_br)
+        mask_before = t_range < t_r_val
+        mask_after  = t_range > t_r_val + t_br
+
+        # 점선: 제동 시작 전 (가상 연장)
+        if mask_before.any():
+            fig_time.add_trace(go.Scatter(
+                x=t_range[mask_before], y=s_all[mask_before],
+                showlegend=False,
+                line=dict(color=col, width=lw * 0.85, dash="dash"),
+                hovertemplate=f"반응 {t_r_val}s<br>t=%{{x:.2f}}s<br>s=%{{y:.1f}}m (가상)<extra></extra>",
+            ))
+
+        # 실선: 실제 제동 구간
+        fig_time.add_trace(go.Scatter(
+            x=t_range[mask_solid], y=s_all[mask_solid],
+            name=f"t_반응 = {t_r_val}s",
+            line=dict(color=col, width=lw),
+            hovertemplate=f"반응 {t_r_val}s<br>t=%{{x:.2f}}s<br>s=%{{y:.1f}}m<extra></extra>",
+        ))
+
+        # 점선: 정지 이후 (가상 연장)
+        if mask_after.any():
+            fig_time.add_trace(go.Scatter(
+                x=t_range[mask_after], y=s_all[mask_after],
+                showlegend=False,
+                line=dict(color=col, width=lw * 0.85, dash="dash"),
+                hovertemplate=f"반응 {t_r_val}s<br>t=%{{x:.2f}}s<br>s=%{{y:.1f}}m (가상)<extra></extra>",
+            ))
+
+        # 꼭짓점 마커 (다이아몬드)
+        t_vert = t_r_val + t_br
+        s_vert = v0 * t_vert - 0.5 * decel * t_br ** 2
+        fig_time.add_trace(go.Scatter(
+            x=[t_vert], y=[s_vert],
+            mode="markers", showlegend=False,
+            marker=dict(size=9, color=col, symbol="diamond",
+                        line=dict(width=1.5, color="white")),
+            hovertemplate=(
+                f"꼭짓점 (반응 {t_r_val}s)<br>"
+                f"t = {t_vert:.2f}s<br>"
+                f"s = {s_vert:.1f}m<extra></extra>"
+            ),
+        ))
+
+        # 반응 구간 점선 (실제 물리적 직선)
+        if t_r_val > 0:
+            t_rp = np.linspace(max(0.0, t_r_val - 0.01), t_r_val, 30)
+            fig_time.add_trace(go.Scatter(
+                x=t_rp, y=v0 * t_rp,
+                showlegend=False,
+                line=dict(color=col, width=lw * 0.6, dash="dot"),
+            ))
+
+    # 꼭짓점 이동 경로
+    t_verts_list = [tr + t_br for tr in T_LIST]
+    s_verts_list = [v0 * (tr + t_br) - 0.5 * decel * t_br ** 2 for tr in T_LIST]
+    fig_time.add_trace(go.Scatter(
+        x=t_verts_list, y=s_verts_list,
+        mode="lines", name="꼭짓점 이동 경로",
+        line=dict(color="#374151", width=1.5, dash="dot"),
+        hovertemplate="꼭짓점<br>t=%{x:.2f}s<br>s=%{y:.1f}m<extra></extra>",
+    ))
+
+    # 평행이동 화살표 (t_r=0 꼭짓점 → 현재 t_react 꼭짓점)
+    if t_react > 0.01:
+        t_v0  = t_br
+        s_v0  = v0 * t_br - 0.5 * decel * t_br ** 2
+        t_vcr = t_react + t_br
+        s_vcr = v0 * (t_react + t_br) - 0.5 * decel * t_br ** 2
+        fig_time.add_annotation(
+            ax=t_v0, ay=s_v0, axref="x", ayref="y",
+            x=t_vcr, y=s_vcr,
+            arrowhead=3, arrowcolor="#374151", arrowwidth=2,
+            text=f"  (+{t_react}s, +{d_r:.1f}m)",
+            font=dict(size=10, color="#374151"),
+        )
+
+    # 현재 반응시간 수직선
+    fig_time.add_shape(type="line", x0=t_react, x1=t_react,
+                       y0=0, y1=1, yref="paper",
+                       line=dict(dash="dash", color="#7C3AED", width=1.5))
+    fig_time.add_annotation(
+        x=t_react + 0.05, y=0.97, yref="paper",
+        text=f"현재 반응시간 {t_react}s",
+        showarrow=False, font=dict(size=10, color="#7C3AED"), xanchor="left",
+    )
+
+    s_arr  = np.array(s_collected)
+    y_lo   = max(float(s_arr.min()) * 1.2, -d_b * 0.7)
+    y_hi   = float(s_arr.max()) * 1.1
+
+    fig_time.update_layout(
+        **blayout("s(t) = v₀t − ½a(t−t_반응)²  반응시간별 평행이동",
+                  "시간 t (s)", "정지거리 s (m)", h=500),
+    )
+    fig_time.update_yaxes(range=[y_lo, y_hi])
+    st.plotly_chart(fig_time, use_container_width=True)
+
+    st.caption(
+        f"🔷 다이아몬드 = 꼭짓점  ·  점선 연결 = 꼭짓점 이동 경로  "
+        f"반응 1s 증가 → 오른쪽 +1s, 위로 +{v0:.1f}m 평행이동  ·  "
+        f"현재 속력 v₀ = {speed_kmh}km/h = {v0:.2f}m/s"
+    )
+
+    with st.expander("📐 평행이동 수학적 증명"):
+        st.markdown(
+            f"**포물선**: s(t) = v₀·t − ½·a·(t − t_반응)²\n\n"
+            f"반응시간이 Δt 증가할 때 s(t+Δt) 계산:\n\n"
+            f"s(t+Δt, t_반응+Δt) = v₀·(t+Δt) − ½·a·(t+Δt − t_반응 − Δt)²\n\n"
+            f"= v₀·t − ½·a·(t−t_반응)² + v₀·Δt = **s(t) + v₀·Δt**\n\n"
+            f"→ x축 +Δt, y축 +v₀·Δt 방향으로 **평행이동**\n\n"
+            f"현재 v₀={v0:.2f}m/s → 반응 1s 증가마다 정지거리 +{v0:.1f}m"
+        )
+
+    st.markdown("---")
+
+    # ── 속력-시간 그래프 (정지 이후 음수 연장) ──────────
+    st.markdown("##### 속력 – 시간 그래프 (정지 이후 음수 속력 이론값 연장)")
+    ext_dur   = t_br * 0.8
+    t_ext_end = t_tot + ext_dur
+
+    t1 = np.linspace(0,       t_react, 50)
+    t2 = np.linspace(t_react, t_tot,   100)
+    t3 = np.linspace(t_tot,   t_ext_end, 60)
+
+    v1        = np.full(50, v0 * 3.6)
+    v2        = np.maximum(0, (v0 - decel*(t2-t_react)) * 3.6)
+    v3_theory = (v0 - decel*(t3-t_react)) * 3.6
+    v3_real   = np.zeros(60)
+
+    fig_vt = go.Figure()
+    fig_vt.add_trace(go.Scatter(
+        x=t1, y=v1, name="반응 구간",
+        line=dict(color="#16A34A", width=2.5),
+        fill="tozeroy", fillcolor="rgba(22,163,74,0.08)",
+        hovertemplate="t=%{x:.2f}s<br>v=%{y:.1f}km/h<extra></extra>",
+    ))
+    fig_vt.add_trace(go.Scatter(
+        x=t2, y=v2, name="제동 구간",
+        line=dict(color="#DC2626", width=2.5),
+        fill="tozeroy", fillcolor="rgba(220,38,38,0.08)",
+        hovertemplate="t=%{x:.2f}s<br>v=%{y:.1f}km/h<extra></extra>",
+    ))
+    fig_vt.add_trace(go.Scatter(
+        x=t3, y=v3_real, name="실제 (정지)",
+        line=dict(color="#374151", width=2),
+    ))
+    fig_vt.add_trace(go.Scatter(
+        x=t3, y=v3_theory, name="이론값 (음수 연장, 가상)",
+        line=dict(color="#DC2626", width=2, dash="dash"),
+        fill="tozeroy", fillcolor="rgba(220,38,38,0.04)",
+        hovertemplate="t=%{x:.2f}s<br>이론v=%{y:.1f}km/h<extra></extra>",
+    ))
+    fig_vt.add_shape(type="line", x0=0, x1=1, xref="paper", y0=0, y1=0,
+                     line=dict(dash="dash", color="#6B7280", width=1.2))
+    fig_vt.add_trace(go.Scatter(
+        x=[t_tot], y=[0], mode="markers+text",
+        marker=dict(size=12, color="#7C3AED", symbol="star",
+                    line=dict(width=2, color="white")),
+        text=[f"  정지 ({t_tot:.2f}s)"],
+        textposition="middle right",
+        textfont=dict(size=10, color="#7C3AED"),
+        name="정지점",
+    ))
+    y_vt_min = v3_theory[-1] * 1.3
+    fig_vt.add_shape(type="rect", x0=t_tot, x1=t_ext_end,
+                     y0=y_vt_min, y1=0,
+                     fillcolor="rgba(220,38,38,0.04)", line_width=0)
+    fig_vt.add_annotation(
+        x=(t_tot+t_ext_end)/2, y=y_vt_min*0.55,
+        text="음수 속력 영역 (이론값)",
+        showarrow=False, font=dict(size=10, color="#DC2626"),
+    )
+    fig_vt.update_layout(
+        **blayout("속력 – 시간 (정지 이후 이론 연장)", "시간 t (s)", "속력 v (km/h)", h=300),
+    )
+    st.plotly_chart(fig_vt, use_container_width=True)
+    st.caption("점선 = 마찰이 계속 작용한다면 속력이 음수 영역으로 진입 · 실제는 v=0에서 정지")
+
+# ══════════════════════════════════════════════
+# Tab 2 — 마찰계수 비교
+# ══════════════════════════════════════════════
+with tab2:
+    st.markdown("#### 마찰계수(노면 상태)별 제동거리-속력 그래프 비교")
+    st.caption("조건을 선택해 같은 그래프에서 비교하세요 · 색이 다른 곡선이 각 노면 상태를 나타냅니다")
+
+    selected = st.multiselect(
+        "비교할 노면 조건 선택",
+        options=list(ROAD_INFO.keys()),
+        default=list(ROAD_INFO.keys()),
+        key="mu_compare",
+    )
+
+    v_range = np.linspace(0, 80, 400)    # km/h (자전거 범위)
+    v_ms    = v_range / 3.6
+
+    m2l, m2r = st.columns(2)
+
+    # ── 왼쪽: 제동거리만 ──────────────────────────
+    with m2l:
+        fig_mu1 = go.Figure()
+        for cond in selected:
+            info  = ROAD_INFO[cond]
+            d_cur = v_ms**2 / (2 * info["mu"] * g)
+            label = cond.split(" ",1)[-1]
+            fig_mu1.add_trace(go.Scatter(
+                x=v_range, y=d_cur,
+                name=f"{label} (μ={info['mu']})",
+                line=dict(color=info["color"], width=2.5),
+                hovertemplate=f"μ={info['mu']}<br>v=%{{x}}km/h<br>d=%{{y:.1f}}m<extra></extra>",
+            ))
+            # 현재 속도 마커
+            d_mark = (speed_kmh/3.6)**2 / (2*info["mu"]*g)
+            fig_mu1.add_trace(go.Scatter(
+                x=[speed_kmh], y=[d_mark], mode="markers",
+                marker=dict(size=10, color=info["color"],
+                            symbol="circle-open", line=dict(width=2)),
+                showlegend=False,
+                hovertemplate=f"{label}: {d_mark:.1f}m<extra></extra>",
+            ))
+
+        # 현재 속도 수직선
+        fig_mu1.add_shape(type="line", x0=speed_kmh, x1=speed_kmh,
+                          y0=0, y1=1, yref="paper",
+                          line=dict(dash="dash", color="#374151", width=1.5))
+        fig_mu1.add_annotation(x=speed_kmh, y=1, yref="paper",
+                               text=f"  현재 {speed_kmh}km/h",
+                               showarrow=False, font=dict(size=10), xanchor="left")
+
+        fig_mu1.update_layout(
+            **blayout("제동거리 비교 (반응시간 제외)", "속력 v (km/h)", "제동거리 d (m)")
+        )
+        st.plotly_chart(fig_mu1, use_container_width=True)
+
+    # ── 오른쪽: 전체 정지거리 ────────────────────────
+    with m2r:
+        fig_mu2 = go.Figure()
+        for cond in selected:
+            info  = ROAD_INFO[cond]
+            d_tot_cur = v_ms*t_react + v_ms**2/(2*info["mu"]*g)
+            label = cond.split(" ",1)[-1]
+            fig_mu2.add_trace(go.Scatter(
+                x=v_range, y=d_tot_cur,
+                name=f"{label} (μ={info['mu']})",
+                line=dict(color=info["color"], width=2.5),
+                hovertemplate=f"μ={info['mu']}<br>v=%{{x}}km/h<br>정지거리=%{{y:.1f}}m<extra></extra>",
+            ))
+            d_mark = (speed_kmh/3.6)*t_react + (speed_kmh/3.6)**2/(2*info["mu"]*g)
+            fig_mu2.add_trace(go.Scatter(
+                x=[speed_kmh], y=[d_mark], mode="markers",
+                marker=dict(size=10, color=info["color"],
+                            symbol="circle-open", line=dict(width=2)),
+                showlegend=False,
+            ))
+
+        fig_mu2.add_shape(type="line", x0=speed_kmh, x1=speed_kmh,
+                          y0=0, y1=1, yref="paper",
+                          line=dict(dash="dash", color="#374151", width=1.5))
+        fig_mu2.add_annotation(x=speed_kmh, y=1, yref="paper",
+                               text=f"  현재 {speed_kmh}km/h",
+                               showarrow=False, font=dict(size=10), xanchor="left")
+
+        fig_mu2.update_layout(
+            **blayout(f"전체 정지거리 비교 (반응시간 {t_react}s 포함)",
+                      "속력 v (km/h)", "정지거리 (m)")
+        )
+        st.plotly_chart(fig_mu2, use_container_width=True)
+
+    # 현재 속도에서 노면별 비교 표
+    st.markdown(f"**현재 속도 {speed_kmh} km/h 에서 노면별 거리 비교**")
+    rows = []
+    for cond in list(ROAD_INFO.keys()):
+        info = ROAD_INFO[cond]
+        dr   = (speed_kmh/3.6)*t_react
+        db   = (speed_kmh/3.6)**2 / (2*info["mu"]*g)
+        rows.append({
+            "노면": cond.split(" ",1)[-1],
+            "μ": info["mu"],
+            "반응거리(m)": round(dr,1),
+            "제동거리(m)": round(db,1),
+            "정지거리(m)": round(dr+db,1),
+            "감속도(m/s²)": round(info["mu"]*g,2),
+        })
+    import pandas as pd
+    df_mu = pd.DataFrame(rows)
+    st.dataframe(df_mu, use_container_width=True, hide_index=True)
+
+# ══════════════════════════════════════════════
+# Tab 3 — 반응시간 비교
+# ══════════════════════════════════════════════
+with tab3:
+    st.markdown("#### 반응시간에 따른 정지거리 변화 비교")
+    st.caption("반응시간이 길어질수록 곡선 전체가 위로 평행 이동합니다 (제동거리는 그대로, 반응거리만 증가)")
+
+    t_react_list = [0.5, 1.0, 1.5, 2.0, 2.5, 3.0]
+    T_COLORS     = ["#7C3AED","#2563EB","#10B981","#F59E0B","#EA580C","#DC2626"]
+
+    v_range2 = np.linspace(0, 80, 400)
+    v_ms2    = v_range2 / 3.6
+    d_brake2 = v_ms2**2 / (2*decel)   # 제동거리 (반응시간 무관)
+
+    rt1, rt2 = st.columns(2)
+
+    # ── 왼쪽: 전체 정지거리 비교 ──────────────────────
+    with rt1:
+        fig_rt1 = go.Figure()
+
+        # 제동거리만 (기준선)
+        fig_rt1.add_trace(go.Scatter(
+            x=v_range2, y=d_brake2,
+            name="제동거리만 (공통)",
+            line=dict(color="#CBD5E1", width=2, dash="dot"),
+            hovertemplate="v=%{x}km/h<br>제동거리=%{y:.1f}m<extra></extra>",
+        ))
+
+        for tr_val, col in zip(t_react_list, T_COLORS):
+            d_stop = v_ms2*tr_val + d_brake2
+            lw = 3 if abs(tr_val - t_react) < 0.05 else 1.8
+            dash = "solid" if abs(tr_val - t_react) < 0.05 else "solid"
+            fig_rt1.add_trace(go.Scatter(
+                x=v_range2, y=d_stop,
+                name=f"반응 {tr_val}s",
+                line=dict(color=col, width=lw, dash=dash),
+                hovertemplate=f"반응{tr_val}s<br>v=%{{x}}km/h<br>정지=%{{y:.1f}}m<extra></extra>",
+            ))
+
+        # 현재 속도 마커
+        for tr_val, col in zip(t_react_list, T_COLORS):
+            d_mark = (speed_kmh/3.6)*tr_val + (speed_kmh/3.6)**2/(2*decel)
+            fig_rt1.add_trace(go.Scatter(
+                x=[speed_kmh], y=[d_mark], mode="markers",
+                marker=dict(size=8, color=col, symbol="circle-open",
+                            line=dict(width=2)),
+                showlegend=False,
+            ))
+
+        fig_rt1.add_shape(type="line", x0=speed_kmh, x1=speed_kmh,
+                          y0=0, y1=1, yref="paper",
+                          line=dict(dash="dash", color="#374151", width=1.5))
+
+        fig_rt1.update_layout(
+            **blayout(f"반응시간별 정지거리 ({road.split(' ',1)[-1]})",
+                      "속력 v (km/h)", "정지거리 (m)")
+        )
+        st.plotly_chart(fig_rt1, use_container_width=True)
+        st.caption("점선 = 제동거리만 (공통 기준선) · 반응시간이 커질수록 곡선이 위로 이동")
+
+    # ── 오른쪽: 현재 속도에서 반응시간별 막대 ────────────
+    with rt2:
+        d_brakes_bar = [(speed_kmh/3.6)**2/(2*decel)] * len(t_react_list)
+        d_reacts_bar = [(speed_kmh/3.6)*tr for tr in t_react_list]
+
+        fig_rt2 = go.Figure()
+        fig_rt2.add_trace(go.Bar(
+            x=[f"{tr}s" for tr in t_react_list],
+            y=d_reacts_bar, name="반응거리",
+            marker_color=T_COLORS,
+            opacity=0.75,
+            hovertemplate="반응거리: %{y:.1f}m<extra></extra>",
+        ))
+        fig_rt2.add_trace(go.Bar(
+            x=[f"{tr}s" for tr in t_react_list],
+            y=d_brakes_bar, name="제동거리 (공통)",
+            marker_color="#CBD5E1",
+            hovertemplate="제동거리: %{y:.1f}m<extra></extra>",
+        ))
+
+        # 현재 반응시간 강조
+        cur_idx = min(range(len(t_react_list)),
+                      key=lambda i: abs(t_react_list[i]-t_react))
+        fig_rt2.add_shape(
+            type="rect",
+            x0=cur_idx-0.5, x1=cur_idx+0.5, y0=0, y1=1, yref="paper",
+            fillcolor="rgba(124,58,237,0.08)", line=dict(color="#7C3AED",width=1.5),
+        )
+
+        fig_rt2.update_layout(
+            **blayout(f"현재 속도 {speed_kmh}km/h 에서 반응시간별 거리",
+                      "반응시간", "거리 (m)", h=360),
+            barmode="stack",
+        )
+        st.plotly_chart(fig_rt2, use_container_width=True)
+        st.caption("🟣 강조 = 현재 설정 반응시간  ·  제동거리는 동일하고 반응거리만 늘어남")
+
+    # 반응시간별 수치 표
+    st.markdown(f"**속도 {speed_kmh} km/h · {road.split(' ',1)[-1]} 조건에서 반응시간별 정지거리**")
+    rows_rt = []
+    for tr_val in t_react_list:
+        dr = round((speed_kmh/3.6)*tr_val, 1)
+        db = round((speed_kmh/3.6)**2/(2*decel), 1)
+        rows_rt.append({
+            "반응시간(s)": tr_val,
+            "반응거리(m)": dr,
+            "제동거리(m)": db,
+            "정지거리(m)": round(dr+db,1),
+            "반응거리 비율(%)": round(dr/(dr+db)*100,1),
+        })
+    st.dataframe(pd.DataFrame(rows_rt), use_container_width=True, hide_index=True)
+
+# ══════════════════════════════════════════════
+# Tab 4 — 질량 무관성
+# ══════════════════════════════════════════════
+with tab4:
+    st.markdown("#### 질량은 제동거리에 영향을 주지 않는다")
+    st.caption("F = μmg, a = F/m = μg  →  질량 m이 소거됩니다!")
+
+    # 공식 유도
+    st.markdown("""
+    $$F_{마찰} = \\mu m g \\qquad a = \\frac{F}{m} = \\frac{\\mu m g}{m} = \\mu g$$
+
+    $$d = \\frac{v^2}{2a} = \\frac{v^2}{2\\mu g} \\quad \\leftarrow \\textbf{질량 없음!}$$
+    """)
+
+    masses_test = [40, 55, 70, 90, 110, 150]
+    d_test = [(speed_kmh/3.6)**2 / (2*mu*g)] * len(masses_test)   # 모두 동일!
+    F_tests = [mu * m * g / 1000 for m in masses_test]             # 마찰력은 다름
+
+    ma1, ma2 = st.columns(2)
+
+    with ma1:
+        fig_m1 = go.Figure()
+        bar_cols = ["#7C3AED" if m == mass else "#CBD5E1" for m in masses_test]
+        fig_m1.add_trace(go.Bar(
+            x=[f"{m}kg" for m in masses_test],
+            y=d_test,
+            marker_color=bar_cols,
+            hovertemplate="질량: %{x}<br>제동거리: %{y:.2f}m<extra></extra>",
+            showlegend=False,
+        ))
+        fig_m1.update_layout(
+            **blayout(f"질량별 제동거리 ({speed_kmh}km/h, μ={mu})",
+                      "질량 (kg)", "제동거리 (m)", h=320),
+        )
+        fig_m1.update_yaxes(range=[0, d_test[0]*1.5])
+        st.plotly_chart(fig_m1, use_container_width=True)
+        st.caption(f"모든 질량에서 제동거리 = **{d_test[0]:.2f} m** (완전히 동일)")
+
+    with ma2:
+        fig_m2 = go.Figure()
+        fig_m2.add_trace(go.Bar(
+            x=[f"{m}kg" for m in masses_test],
+            y=F_tests,
+            marker_color=["#7C3AED" if m == mass else "#A78BFA" for m in masses_test],
+            hovertemplate="질량: %{x}<br>마찰력: %{y:.1f}kN<extra></extra>",
+            showlegend=False,
+        ))
+        fig_m2.update_layout(
+            **blayout("질량별 마찰력 (마찰력은 질량에 비례)",
+                      "질량 (kg)", "마찰력 F (kN)", h=320),
+        )
+        st.plotly_chart(fig_m2, use_container_width=True)
+        st.caption("마찰력은 질량에 비례해 커지지만, 가속도(=F/m)는 항상 μg로 일정!")
+
+    st.info(
+        f"💡 **핵심**: 무거운 차일수록 마찰력은 크지만, "
+        f"질량도 커서 가속도가 같아집니다. "
+        f"현재 감속도 = μg = {mu} × 9.8 = **{mu*9.8:.2f} m/s²** (질량과 무관)"
+    )
+
+st.divider()
+st.caption(
+    f"μ = {mu} | 반응시간 = {t_react}s | 질량 = {mass}kg | g = 9.8 m/s²"
+)
